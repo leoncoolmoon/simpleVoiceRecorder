@@ -1,0 +1,96 @@
+:root {
+    --background-color: #ffffff;
+    --text-color: #000000;
+    --border-color: #dddddd;
+    --progress-background: #eeeeee;
+    --progress-color: #4CAF50;
+}
+
+@media (prefers-color-scheme: dark) {
+    :root {
+        --background-color: #1a1a1a;
+        --text-color: #ffffff;
+        --border-color: #333333;
+        --progress-background: #333333;
+        --progress-color: #4CAF50;
+    }
+}
+
+body {
+    margin: 0;
+    padding: 20px;
+    font-family: system-ui, -apple-system, sans-serif;
+    background-color: var(--background-color);
+    color: var(--text-color);
+}
+
+#recorderContainer {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    width: 300px;
+    margin: auto;
+    padding: 20px;
+    border-radius: 12px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+#buttonContainer {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    margin-bottom: 10px;
+}
+
+#timer {
+    font-size: 1.2em;
+    margin-left: 10px;
+    color: var(--text-color);
+}
+
+#visualizer {
+    width: 100%;
+    height: 10px;
+    background: var(--progress-background);
+    border-radius: 5px;
+    position: relative;
+    margin-top: 5px;
+    overflow: hidden;
+}
+
+#progress {
+    height: 100%;
+    width: 0;
+    background: var(--progress-color);
+    transition: width 0.05s ease;
+    border-radius: 5px;
+}
+
+button {
+    border: none;
+    background: none;
+    cursor: pointer;
+    padding: 8px;
+    border-radius: 50%;
+    transition: background-color 0.2s;
+}
+
+button:hover {
+    background-color: rgba(128, 128, 128, 0.1);
+}
+
+button:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+}
+
+button svg {
+    width: 24px;
+    height: 24px;
+    fill: var(--text-color);
+}
+
+#audioPlayback {
+    margin-top: 20px;
+    width: 100%;
+}
