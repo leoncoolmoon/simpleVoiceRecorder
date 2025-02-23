@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>录音机</title>
+    <link rel="icon" href="icon-192x192.png">
+    <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+    <meta name="theme-color" content="#1a1a1a" media="(prefers-color-scheme: dark)">
+    
+    <!-- 内联 manifest -->
+    <script type="manifest">
+    {
+        "name": "简易录音机",
+        "short_name": "录音机",
+        "description": "一个简单的网页录音机应用",
+        "start_url": "/",
+        "display": "standalone",
+        "background_color": "#ffffff",
+        "theme_color": "#ffffff",
+        "icons": [
+            {
+                "src": "icon-192x192.png",
+                "sizes": "192x192",
+                "type": "image/png"
+            },
+            {
+                "src": "icon-512x512.png",
+                "sizes": "512x512",
+                "type": "image/png"
+            }
+        ]
+    }
+    </script>
+    <script>
+        // 动态创建和注册 manifest
+        const manifestContent = document.querySelector('script[type="manifest"]').textContent;
+        const manifestBlob = new Blob([manifestContent], {type: 'application/json'});
+        const manifestUrl = URL.createObjectURL(manifestBlob);
+        const manifestLink = document.createElement('link');
+        manifestLink.rel = 'manifest';
+        manifestLink.href = manifestUrl;
+        document.head.appendChild(manifestLink);
+    </script>
+
+    <style>
+        :root {
+            --background-color: #ffffff;
+            --text-color: #000000;
+            --border-color: #dddddd;
+            --progress-background: #eeeeee;
+            --progress-color: #4CAF50;
+        }
+
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --background-color: #1a1a1a;
+                --text-color: #ffffff;
+                --border-color: #333333;
+                --progress-background: #333333;
+                --progress-color: #4CAF50;
+            }
+        }
+
+        body {
+            margin: 0;
+            padding: 20px;
+            font-family: system-ui, -apple-system, sans-serif;
+            background-color: var(--background-color);
+            color: var(--text-color);
+        }
+
+        #recorderContainer {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            width: 300px;
+            margin: auto;
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        }
+
+        #buttonContainer {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+
+        #timer {
+            font-size: 1.2em;
+            margin-left: 10px;
+            color: var(--text-color);
+        }
+
+        #visualizer {
+            width: 100%;
+            height: 10px;
+            background: var(--progress-background);
+            border-radius: 5px;
+            position: relative;
+            margin-top: 5px;
+            overflow: hidden;
+        }
+
+        #progress {
+            height: 100%;
+            width: 0;
+            background: var(--progress-color);
+            transition: width 0.05s ease;
+            border-radius: 5px;
+        }
+
+        button {
+            border: none;
+            background: none;
+            cursor: pointer;
+            padding: 8px;
+            border-radius: 50%;
+            transition: background-color 0.2s;
+        }
+
+        button:hover {
+            background-color: rgba(128, 128, 128, 0.1);
+        }
+
+        button:disabled {
+            cursor: not-allowed;
+            opacity: 0.5;
+        }
+
+        button svg {
+            width: 24px;
+            height: 24px;
+            fill: var(--text-color);
+        }
+
+        #audioPlayback {
+            margin-top: 20px;
+            width: 100%;
+        }
+    </style>
+</head>
+<body>
+    <div id="recorderContainer">
+        <div id="buttonContainer">
+            <button id="startButton">
+                <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="6"></circle></svg>
+            </button>
+            <button id="pauseButton" style="display: none;">
+                <svg viewBox="0 0 24 24"><rect x="7" y="6" width="4" height="12"></rect><rect x="13" y="6" width="4" height="12"></rect></svg>
+            </button>
+            <button id="resumeButton" style="display: none;">
+                <svg viewBox="0 0 24 24"><circle cx="9" cy="12" r="3"></circle><rect x="13" y="6" width="4" height="12"></rect></svg>
+            </button>
+            <button id="stopButton" disabled>
+                <svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12"></rect></svg>
+            </button>
+            <span id="timer">00:00</span>
+        </div>
+        <div id="visualizer">
+            <div id="progress"></div>
+        </div>
+        <audio id="audioPlayback" controls></audio>
+    </div>
+
+    <script>
+        // Service Worker 代码
+        const swCode = `
+            const CACHE_NAME = 'voice-recorder-v1';
+            const urlsToCache = [
+                '/',
+                '/index.html',
+                '/icon-192x192.png',
+                '/icon-512x512.png'
+            ];
+
+            self.addEventListener('install', event => {
+                event.waitUntil(
+                    caches.open(CACHE_NAME)
+                        .then(cache => cache.addAll(urlsToCache))
+                );
+            });
+
+            self.addEventListener('fetch', event => {
+                event.respondWith(
+                    caches.match(event.request)
+                        .then(response => response || fetch(event.request))
+                );
+            });
+        `;
+
+        // 注册 Service Worker
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', async () => {
+                try {
+                    const swBlob = new Blob([swCode], { type: 'text/javascript' });
+                    const swUrl = URL.createObjectURL(swBlob);
+                    await navigator.serviceWorker.register(swUrl);
+                    console.log('ServiceWorker registration successful');
+                } catch (err) {
+                    console.log('ServiceWorker registration failed: ', err);
+                }
+            });
+        }
+
+        // 录音机主要功能代码
+        let mediaRecorder;
+        let audioChunks = [];
+        let isRecording = false;
+        let isPaused = false;
+        let timerInterval;
+        let seconds = 0;
+        let analyser, microphone, audioContext;
+        let animationFrame;
+
+        function updateTimer() {
+            seconds++;
+            const minutes = Math.floor(seconds / 60).toString().padStart(2, '0');
+            const secs = (seconds % 60).toString().padStart(2, '0');
+            document.getElementById('timer').textContent = `${minutes}:${secs}`;
+        }
+
+        function calculateVolume(dataArray) {
+            const sum = dataArray.reduce((a, b) => a + b, 0);
+            const avg = sum / dataArray.length;
+            return Math.min(100, Math.round((avg / 128) * 100 * 2));
+        }
+
+        function visualize(stream) {
+            if (audioContext) {
+                audioContext.close();
+            }
+            
+            audioContext = new AudioContext();
+            analyser = audioContext.createAnalyser();
+            microphone = audioContext.createMediaStreamSource(stream);
+            
+            analyser.fftSize = 1024;
+            analyser.smoothingTimeConstant = 0.5;
+            
+            microphone.connect(analyser);
+            const dataArray = new Uint8Array(analyser.frequencyBinCount);
+            
+            function updateVisualizer() {
+                if (!isRecording) {
+                    cancelAnimationFrame(animationFrame);
+                    document.getElementById('progress').style.width = '0%';
+                    return;
+                }
+
+                analyser.getByteFrequencyData(dataArray);
+                const volume = calculateVolume(dataArray);
+                document.getElementById('progress').style.width = `${volume}%`;
+                
+                animationFrame = requestAnimationFrame(updateVisualizer);
+            }
+            
+            updateVisualizer();
+        }
+
+        document.getElementById('startButton').addEventListener('click', async () => {
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                alert('您的浏览器不支持录音功能。');
+                return;
+            }
+            
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ 
+                    audio: {
+                        echoCancellation: true,
+                        noiseSuppression: true,
+                        autoGainControl: false
+                    } 
+                });
+                
+                if (!mediaRecorder || mediaRecorder.state === 'inactive') {
+                    mediaRecorder = new MediaRecorder(stream);
+                    mediaRecorder.ondataavailable = event => {
+                        audioChunks.push(event.data);
+                    };
+                    mediaRecorder.onstop = () => {
+                        const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+                        document.getElementById('audioPlayback').src = URL.createObjectURL(audioBlob);
+                    };
+                }
+                
+                mediaRecorder.start();
+                audioChunks = [];
+                seconds = 0;
+                document.getElementById('timer').textContent = '00:00';
+                isRecording = true;
+                visualize(stream);
+                timerInterval = setInterval(updateTimer, 1000);
+                
+                document.getElementById('startButton').style.display = 'none';
+                document.getElementById('pauseButton').style.display = 'inline';
+                document.getElementById('stopButton').disabled = false;
+            } catch (error) {
+                alert('无法访问麦克风，请检查权限设置。');
+                console.error('录音错误:', error);
+            }
+        });
+
+        document.getElementById('pauseButton').addEventListener('click', () => {
+            mediaRecorder.pause();
+            clearInterval(timerInterval);
+            document.getElementById('pauseButton').style.display = 'none';
+            document.getElementById('resumeButton').style.display = 'inline';
+            isPaused = true;
+        });
+
+        document.getElementById('resumeButton').addEventListener('click', () => {
+            mediaRecorder.resume();
+            timerInterval = setInterval(updateTimer, 1000);
+            document.getElementById('resumeButton').style.display = 'none';
+            document.getElementById('pauseButton').style.display = 'inline';
+            isPaused = false;
+        });
+
+        document.getElementById('stopButton').addEventListener('click', () => {
+            isRecording = false;
+            mediaRecorder.stop();
+            clearInterval(timerInterval);
+            
+            if (audioContext) {
+                audioContext.close();
+            }
+            
+            document.getElementById('startButton').style.display = 'inline';
+            document.getElementById('pauseButton').style.display = 'none';
+            document.getElementById('resumeButton').style.display = 'none';
+            document.getElementById('stopButton').disabled = true;
+            isPaused = false;
+            
+            document.getElementById('progress').style.width = '0%';
+        });
+    </script>
+</body>
+</html>
