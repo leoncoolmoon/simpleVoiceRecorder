@@ -11,7 +11,16 @@ const urlsToCache = [
 self.addEventListener('install', event => {
   event.waitUntil(
     caches.open(CACHE_NAME)
-      .then(cache => cache.addAll(urlsToCache))
+      .then(cache => {
+        return cache.addAll(urlsToCache);
+      })
+      .then(() => {
+        console.log('All resources cached successfully!');
+      })
+      .catch((error) => {
+        console.error('Failed to cache resources:', error);
+        // You could optionally log this error or handle it accordingly.
+      })
   );
 });
 
