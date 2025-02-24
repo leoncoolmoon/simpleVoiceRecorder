@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="zh">
 <head>
@@ -25,6 +26,9 @@
             <button id="stopButton" disabled>
                 <svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12"></rect></svg>
             </button>
+			<button id="downloadButton" style="display: none;">
+    <svg viewBox="0 0 24 24"><path d="M12 16l4-4h-3V3h-2v9H8l4 4z"></path></svg>
+</button>
             <span id="timer">00:00</span>
         </div>
         <div id="visualizer">
@@ -33,6 +37,8 @@
         <audio id="audioPlayback" controls></audio>
         <a href="https://github.com/leoncoolmoon/simpleVoiceRecorder">https://github.com/leoncoolmoon/simpleVoiceRecorder</a>
     </div>
+	<script src="https://cdnjs.cloudflare.com/ajax/libs/lamejs/1.2.0/lame.min.js"></script>
+
     <script>
         let mediaRecorder;
         let audioChunks = [];
@@ -44,7 +50,8 @@
         let animationFrame;
 
         // 注册 Service Worker
-        if ('serviceWorker' in navigator) {
+        try{
+			if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
                 navigator.serviceWorker.register('/simpleVoiceRecorder/sw.js')
                     .then(registration => {
@@ -54,7 +61,98 @@
                         console.log('ServiceWorker registration failed: ', err);
                     });
             });
+        }}catch(e){;}
+		
+		
+async function convertToMP3(audioChunks) {
+    const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+    const arrayBuffer = await audioBlob.arrayBuffer();
+    const audioContext = new AudioContext();
+    const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+
+    const sampleRate = audioBuffer.sampleRate;
+    const pcmSamples = audioBuffer.getChannelData(0); // 取单声道
+
+    // **重要**: Float32 (-1.0 ~ 1.0) 转 Int16 (-32768 ~ 32767)
+    const int16Samples = new Int16Array(pcmSamples.length);
+    for (let i = 0; i < pcmSamples.length; i++) {
+        int16Samples[i] = Math.max(-32768, Math.min(32767, pcmSamples[i] * 32768));
+    }
+
+    // MP3 编码
+    const mp3Encoder = new lamejs.Mp3Encoder(1, sampleRate, 128); // 单声道，采样率，128kbps
+    const mp3Data = [];
+    
+    let offset = 0;
+    const samplesPerFrame = 1152;
+    
+    while (offset < int16Samples.length) {
+        const chunk = int16Samples.subarray(offset, offset + samplesPerFrame);
+        const mp3buf = mp3Encoder.encodeBuffer(chunk);
+        if (mp3buf.length > 0) mp3Data.push(mp3buf);
+        offset += samplesPerFrame;
+    }
+
+    const mp3End = mp3Encoder.flush();
+    if (mp3End.length > 0) mp3Data.push(mp3End);
+
+    return new Blob(mp3Data, { type: 'audio/mpeg' });
+}
+
+
+async function convertToWAV(audioChunks) {
+    const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+    const arrayBuffer = await audioBlob.arrayBuffer();
+    const audioContext = new AudioContext();
+    const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+
+    const wavBuffer = encodeWAV(audioBuffer);
+    return new Blob([wavBuffer], { type: 'audio/wav' });
+}
+
+function encodeWAV(audioBuffer) {
+    const numOfChan = audioBuffer.numberOfChannels;
+    const sampleRate = audioBuffer.sampleRate;
+    const bytesPerSample = 2;
+    const blockAlign = numOfChan * bytesPerSample;
+    const buffer = new ArrayBuffer(44 + audioBuffer.length * blockAlign);
+    const view = new DataView(buffer);
+
+    function writeString(view, offset, string) {
+        for (let i = 0; i < string.length; i++) {
+            view.setUint8(offset + i, string.charCodeAt(i));
         }
+    }
+
+    // RIFF header
+    writeString(view, 0, 'RIFF');
+    view.setUint32(4, 32 + audioBuffer.length * blockAlign, true);
+    writeString(view, 8, 'WAVE');
+
+    // FMT subchunk
+    writeString(view, 12, 'fmt ');
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true);
+    view.setUint16(22, numOfChan, true);
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, sampleRate * blockAlign, true);
+    view.setUint16(32, blockAlign, true);
+    view.setUint16(34, bytesPerSample * 8, true);
+
+    // Data subchunk
+    writeString(view, 36, 'data');
+    view.setUint32(40, audioBuffer.length * blockAlign, true);
+
+    const channelData = audioBuffer.getChannelData(0);
+    let offset = 44;
+    for (let i = 0; i < channelData.length; i++) {
+        const sample = Math.max(-1, Math.min(1, channelData[i]));
+        view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7FFF, true);
+        offset += 2;
+    }
+
+    return buffer;
+}
 
         function updateTimer() {
             seconds++;
@@ -124,6 +222,7 @@
                     mediaRecorder.onstop = () => {
                         const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
                         document.getElementById('audioPlayback').src = URL.createObjectURL(audioBlob);
+						document.getElementById('downloadButton').style.display = 'inline';
                     };
                 }
                 
@@ -177,6 +276,48 @@
             
             document.getElementById('progress').style.width = '0%';
         });
+		document.getElementById('downloadButton').addEventListener('click', async () => {
+    // 让用户选择文件保存位置和格式
+    try {
+        const fileHandle = await window.showSaveFilePicker({
+            suggestedName: 'recorded_audio',
+            types: [
+                {
+                    description: 'MP3 Audio',
+                    accept: { 'audio/mpeg': ['.mp3'] },
+                },
+                {
+                    description: 'WAV Audio',
+                    accept: { 'audio/wav': ['.wav'] },
+                },
+                {
+                    description: 'WebM Audio',
+                    accept: { 'audio/webm': ['.webm'] },
+                },
+            ],
+        });
+
+        const fileExtension = fileHandle.name.split('.').pop().toLowerCase();
+        let outputBlob;
+
+        if (fileExtension === 'mp3') {
+            outputBlob = await convertToMP3(audioChunks);
+        } else if (fileExtension === 'wav') {
+            outputBlob = await convertToWAV(audioChunks);
+        } else {
+            outputBlob = new Blob(audioChunks, { type: 'audio/webm' });
+        }
+
+        // 获取文件流并写入
+        const writableStream = await fileHandle.createWritable();
+        await writableStream.write(outputBlob);
+        await writableStream.close();
+        alert(`文件已成功保存为 ${fileHandle.name}`);
+    } catch (error) {
+        console.error('文件保存失败:', error);
+    }
+});
+
     </script>
 </body>
 </html>
